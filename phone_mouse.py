@@ -8,15 +8,18 @@ import tkinter as tk
 from pathlib import Path
 
 u32 = ctypes.windll.user32
-HERE = Path(__file__).resolve().parent
-CONFIG = HERE / "config.json"
+FROZEN = getattr(sys, "frozen", False)  # running as the installed .exe
+HERE = Path(sys.executable if FROZEN else __file__).resolve().parent
+DATA = Path(os.environ["APPDATA"]) / "PhoneMouse" if FROZEN else HERE  # Program Files is read-only
+DATA.mkdir(parents=True, exist_ok=True)
+CONFIG = DATA / "config.json"
 SHOTS = Path.home() / "Pictures" / "PhoneMouse"
 PHONE_SHOTS = "/sdcard/Pictures/Screenshots/* /sdcard/DCIM/Screenshots/*"  # stock Android, Samsung
 # scale = phone pixels per mouse count; return_push = counts you push past the phone edge to come back.
 # ponytail: Android adds its own pointer acceleration, so `scale` is a tuning knob, not a law.
 DEFAULTS = {"side": "right", "scale": 1.0, "return_push": 40}
 NOWIN = 0x08000000  # CREATE_NO_WINDOW: no console flashes for adb
-LOG = HERE / "debug.log"
+LOG = DATA / "debug.log"
 
 
 def log(*a):
@@ -163,8 +166,9 @@ def raw_mouse_loop(sink):
 # ---------- adb / scrcpy ----------
 
 def find_scrcpy():
+    bundled = HERE / "scrcpy" / "scrcpy.exe"  # shipped inside the installer
     hits = glob.glob(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Genymobile.scrcpy*\*\scrcpy.exe"))
-    exe = shutil.which("scrcpy") or (hits[0] if hits else None)
+    exe = (str(bundled) if bundled.exists() else None) or shutil.which("scrcpy") or (hits[0] if hits else None)
     if not exe:
         sys.exit("scrcpy not found. Install it:  winget install Genymobile.scrcpy")
     return exe
@@ -503,5 +507,7 @@ if __name__ == "__main__":
         selftest(); sys.exit()
     ctypes.windll.shcore.SetProcessDpiAwareness(2)  # real pixel coordinates on scaled displays
     SCRCPY = find_scrcpy()
-    ADB = shutil.which("adb") or os.path.join(os.path.dirname(SCRCPY), "adb.exe")
+    ADB = os.path.join(os.path.dirname(SCRCPY), "adb.exe")  # scrcpy's own adb, so versions always match
+    if not os.path.exists(ADB):
+        ADB = shutil.which("adb")
     App()

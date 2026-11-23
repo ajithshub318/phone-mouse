@@ -6,16 +6,19 @@ Screenshots you take on the phone pop up on the PC, where you can draw on them, 
 
 Everything runs over the USB cable. [scrcpy](https://github.com/Genymobile/scrcpy) puts its helper on the phone by itself, so you don't install an app on the phone.
 
-## Requirements
+## Install
 
-- Windows
-- Python 3 and Pillow: `pip install pillow`
-- scrcpy: `winget install Genymobile.scrcpy`
-- An Android phone on a USB cable with USB debugging turned on
+Download `PhoneMouse-Setup.exe` from [Releases](https://github.com/ajithshub318/phone-mouse/releases) and run it. scrcpy is included, so you don't need Python or anything else. Then open **Phone Mouse** from the Start menu.
+
+On the phone, turn on USB debugging (Settings › About phone › tap "Build number" 7 times, then Developer options › USB debugging). Plug it in with a USB cable and accept the "Allow USB debugging?" prompt.
+
+## Run from source
+
+Needs Python 3, Pillow (`pip install pillow`) and scrcpy (`winget install Genymobile.scrcpy`). Then double-click `run.bat`, or run `python phone_mouse.py`.
+
+To build the installer yourself, install Inno Setup (`winget install JRSoftware.InnoSetup`) and run `.\build.ps1`. The installer is written to `dist\PhoneMouse-Setup.exe`.
 
 ## Use
-
-Double-click `run.bat`, or run `python phone_mouse.py`.
 
 - **Layout:** drag the phone box to the left or right of your screen. The choice is saved in `config.json`.
 - **Go to the phone:** move the cursor off that edge of the screen.
