@@ -16,6 +16,12 @@ PHONE_SHOTS = "/sdcard/Pictures/Screenshots/* /sdcard/DCIM/Screenshots/*"  # sto
 # ponytail: Android adds its own pointer acceleration, so `scale` is a tuning knob, not a law.
 DEFAULTS = {"side": "right", "scale": 1.0, "return_push": 40}
 NOWIN = 0x08000000  # CREATE_NO_WINDOW: no console flashes for adb
+LOG = HERE / "debug.log"
+
+
+def log(*a):
+    with open(LOG, "a") as f:
+        print(time.strftime("%H:%M:%S"), *a, file=f)
 
 
 # ---------- pure logic (covered by --test) ----------
@@ -65,6 +71,9 @@ def monitors():
 
 def cursor():
     p = wt.POINT(); u32.GetCursorPos(ctypes.byref(p)); return p.x, p.y
+
+
+MARK = 0x504D  # dwExtraInfo on moves we inject, so the raw listener can ignore them
 
 
 def click():
@@ -122,7 +131,7 @@ class WNDCLASSW(ctypes.Structure):
 
 
 def raw_mouse_loop(sink):
-    """Background thread: push every physical mouse delta (dx, dy) into `sink`. Injected moves are skipped."""
+    """Background thread: push every real mouse/touchpad delta (dx, dy) into `sink`. Our own moves are skipped."""
     u32.DefWindowProcW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
     u32.DefWindowProcW.restype = ctypes.c_ssize_t
     u32.GetRawInputData.argtypes = [wt.HANDLE, wt.UINT, ctypes.c_void_p, ctypes.POINTER(wt.UINT), wt.UINT]
@@ -136,7 +145,8 @@ def raw_mouse_loop(sink):
             ri = RAWINPUT(); size = wt.UINT(ctypes.sizeof(ri))
             ok = u32.GetRawInputData(lp, 0x10000003, ctypes.byref(ri), ctypes.byref(size),
                                      ctypes.sizeof(RAWINPUTHEADER)) != 0xFFFFFFFF
-            if ok and ri.header.dwType == 0 and ri.header.hDevice and not ri.mouse.usFlags & 1:
+            # touchpads report hDevice=0, so skip our own moves by their marker, not by device
+            if ok and ri.header.dwType == 0 and ri.mouse.ulExtraInformation != MARK and not ri.mouse.usFlags & 1:
                 sink.put((ri.mouse.lLastX, ri.mouse.lLastY))
         return u32.DefWindowProcW(h, msg, wp, lp)
 
@@ -193,8 +203,9 @@ def watch_screenshots(q):
 class Sketch:
     COLORS = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#000000", "#ffffff"]
 
-    def __init__(self, root, path):
+    def __init__(self, root, path, app):
         from PIL import Image
+        self.app = app
         self.path, self.img, self.undo, self.color = path, Image.open(path).convert("RGB"), [], self.COLORS[0]
         self.k = min(1.0, root.winfo_screenheight() * 0.78 / self.img.height)
         self.w = tk.Toplevel(root); self.w.title(f"Phone screenshot - {path.name}")
@@ -249,6 +260,7 @@ class Sketch:
 
     def copy(self):
         out = self.save()
+        self.app.ignore_clip_until = time.time() + 4  # don't pop up for our own copy
         p = str(out).replace("'", "''")
         subprocess.Popen(["powershell", "-NoProfile", "-STA", "-Command",
                           "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;"
@@ -273,6 +285,7 @@ class App:
         self.state, self.cool, self.est, self.push, self.entry_y, self.entered = "pc", 0, 0, 0, 0, 0
         self.sending_alt = False
         self.held = None
+        self.clip_seq, self.ignore_clip_until, self.next_clip_check = u32.GetClipboardSequenceNumber(), 0, 0
         self.deltas, self.shots = queue.Queue(), queue.Queue()
         threading.Thread(target=raw_mouse_loop, args=(self.deltas,), daemon=True).start()
         threading.Thread(target=watch_screenshots, args=(self.shots,), daemon=True).start()
@@ -287,8 +300,11 @@ class App:
         tk.Label(self.root, text="Swipe on the phone: drag with the mouse, or Ctrl+Shift+Left / Right.  "
                                  "Alt = back to PC.  Phone screenshots pop up here to draw on.",
                  font=("Segoe UI", 8), fg="#777", wraplength=540).pack(padx=12, pady=(0, 10))
-        self.cv.tag_bind("phone", "<B1-Motion>", self.drag)
-        self.cv.tag_bind("phone", "<ButtonRelease-1>", self.drop)
+        # press on the phone, then follow the mouse on the whole canvas (the box is redrawn while dragging)
+        self.dragging = False
+        self.cv.tag_bind("phone", "<ButtonPress-1>", lambda e: setattr(self, "dragging", True))
+        self.cv.bind("<B1-Motion>", self.drag)
+        self.cv.bind("<ButtonRelease-1>", self.drop)
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.draw_layout()
         self.root.after(10, self.tick)
@@ -316,12 +332,17 @@ class App:
         self.phone_w = w
 
     def drag(self, e):
-        self.draw_layout(phone_x=e.x - self.phone_w / 2)
+        if self.dragging:
+            self.draw_layout(phone_x=e.x - self.phone_w / 2)
 
     def drop(self, e):
+        if not self.dragging:
+            return
+        self.dragging = False
         self.cfg["side"] = "left" if e.x < 280 else "right"
         CONFIG.write_text(json.dumps(self.cfg, indent=2))
         self.draw_layout()
+        self.status.config(text=f"Phone is on the {self.cfg['side']}. Move the cursor off the {self.cfg['side']} edge.")
 
     # main loop
 
@@ -333,6 +354,9 @@ class App:
 
     def update(self):
         now = time.time()
+        if now > self.next_clip_check:  # works even without a phone
+            self.next_clip_check = now + 0.5
+            self.check_pc_screenshot()
         if self.proc is None or self.proc.poll() is not None:
             if self.hwnd:
                 self.status.config(text="Phone disconnected. Plug it in by USB...")
@@ -354,7 +378,8 @@ class App:
             return
 
         while not self.shots.empty():
-            self.popup(self.shots.get())
+            name = self.shots.get()
+            self.popup("New phone screenshot", lambda name=name: self.open_shot(name))
 
         key = None  # Ctrl+Shift+Left / Right = swipe
         if key_down(0x11) and key_down(0x10):
@@ -386,6 +411,7 @@ class App:
         wx = self.R - 220 if right else self.L + 20
         wy = min(max(y - 100, self.T), self.B - 200)
         self.entry_y, self.entered, self.state = y, time.time(), "phone"
+        log("enter at y", y)
         place(self.hwnd, wx, wy)
         u32.SetForegroundWindow(self.hwnd)
         u32.SetCursorPos(wx + 100, wy + 100)
@@ -396,17 +422,19 @@ class App:
         # push the phone pointer hard against the edge you came in from, so we know where it is
         right = self.cfg["side"] == "right"
         for _ in range(30):
-            u32.mouse_event(0x0001, -127 if right else 127, 0, 0, 0)
+            u32.mouse_event(0x0001, -127 if right else 127, 0, 0, MARK)
         self.est, self.push = (0 if right else self.pw), 0
         while not self.deltas.empty():
             self.deltas.get()
 
     def leave(self):
+        log("leave: pushed past the edge")
         self.sending_alt, self.state = True, "leaving"
         tap_alt()  # scrcpy releases the mouse on Alt
         self.root.after(80, self.back_on_pc, 3)
 
     def released(self):
+        log("released: alt", bool(key_down(0x12)), "fg_is_scrcpy", u32.GetForegroundWindow() == self.hwnd)
         self.state = "leaving"
         self.root.after(80, self.back_on_pc, 60)
 
@@ -423,13 +451,32 @@ class App:
 
     # screenshots
 
-    def popup(self, name):
+    def check_pc_screenshot(self):
+        # PrtScn / Win+Shift+S put an image on the clipboard; offer to draw on it
+        seq = u32.GetClipboardSequenceNumber()
+        if seq == self.clip_seq:
+            return
+        self.clip_seq = seq
+        if time.time() < self.ignore_clip_until:
+            return  # our own Copy button
+        from PIL import ImageGrab, Image
+        try:
+            img = ImageGrab.grabclipboard()
+        except Exception:
+            return
+        if isinstance(img, Image.Image):
+            SHOTS.mkdir(parents=True, exist_ok=True)
+            path = SHOTS / time.strftime("PC_%Y%m%d-%H%M%S.png")
+            img.save(path)
+            self.popup("New PC screenshot", lambda: Sketch(self.root, path, self))
+
+    def popup(self, title, on_open):
         t = tk.Toplevel(self.root); t.overrideredirect(True); t.attributes("-topmost", True)
         bg = "#1f1f1f"; t.configure(bg=bg)
-        tk.Label(t, text="New phone screenshot", fg="white", bg=bg, font=("Segoe UI", 11, "bold")).pack(
+        tk.Label(t, text=title, fg="white", bg=bg, font=("Segoe UI", 11, "bold")).pack(
             padx=14, pady=(12, 6), anchor="w")
         row = tk.Frame(t, bg=bg); row.pack(padx=14, pady=(0, 12), anchor="w")
-        tk.Button(row, text="Open and draw", command=lambda: (t.destroy(), self.open_shot(name))).pack(side="left")
+        tk.Button(row, text="Open and draw", command=lambda: (t.destroy(), on_open())).pack(side="left")
         tk.Button(row, text="Dismiss", command=t.destroy).pack(side="left", padx=6)
         t.update_idletasks()
         t.geometry(f"+{self.root.winfo_screenwidth() - t.winfo_width() - 24}"
@@ -441,7 +488,7 @@ class App:
         dest = SHOTS / name.rsplit("/", 1)[-1]
         adb("pull", name, str(dest))
         if dest.exists():
-            Sketch(self.root, dest)
+            Sketch(self.root, dest, self)
         else:
             self.status.config(text=f"Couldn't copy {name} from the phone.")
 
