@@ -1,5 +1,5 @@
 ; Inno Setup script: builds dist\PhoneMouse-Setup.exe. Run build.ps1, not this directly.
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 
 [Setup]
 AppName=Phone Mouse
@@ -17,6 +17,7 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\PhoneMouse.exe
 LicenseFile=LICENSE
+SetupIconFile=icon.ico
 
 [Files]
 Source: "build\app\PhoneMouse\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion

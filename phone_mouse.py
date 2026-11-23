@@ -295,6 +295,9 @@ class App:
         threading.Thread(target=watch_screenshots, args=(self.shots,), daemon=True).start()
 
         self.root = tk.Tk(); self.root.title("Phone Mouse"); self.root.resizable(False, False)
+        icon = Path(getattr(sys, "_MEIPASS", HERE)) / "icon.ico"
+        if icon.exists():
+            self.root.iconbitmap(default=str(icon))  # also used by the screenshot windows
         tk.Label(self.root, text="Drag the phone to the side of your screen where it sits.",
                  font=("Segoe UI", 10)).pack(padx=12, pady=(10, 4))
         self.cv = tk.Canvas(self.root, width=560, height=240, bg="#f4f4f4", highlightthickness=0)

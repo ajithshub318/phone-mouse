@@ -5,11 +5,12 @@ Set-Location $PSScriptRoot
 $scrcpyVersion = "5.0.1"
 
 if (-not (Test-Path .venv-build)) { py -3 -m venv .venv-build }
-.\.venv-build\Scripts\python -m pip install -q pyinstaller pillow
+.\.venv-build\Scripts\python -m pip install -q --disable-pip-version-check pyinstaller pillow
 .\.venv-build\Scripts\python phone_mouse.py --test
 
 # 1. app -> build\app\PhoneMouse\PhoneMouse.exe (no console window)
 .\.venv-build\Scripts\python -m PyInstaller --noconfirm --windowed --name PhoneMouse `
+    --icon ..\icon.ico --add-data "..\icon.ico;." `
     --distpath build\app --workpath build\work --specpath build phone_mouse.py
 
 # 2. scrcpy (includes adb) -> build\scrcpy

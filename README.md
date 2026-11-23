@@ -1,3 +1,5 @@
+<img src="icon.png" width="96" alt="Phone Mouse icon">
+
 # phone-mouse
 
 Use your Android phone like a second monitor for your mouse and keyboard. Put the phone to the left or right of your screen in the layout window. Move the cursor off that edge and it carries on onto the phone. Move it back across the phone's edge and it returns to the PC.
