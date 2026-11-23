@@ -1,5 +1,5 @@
-; Inno Setup script: builds dist\PhoneMouse-Setup.exe. Run build.ps1, not this directly.
-#define AppVersion "1.0.1"
+﻿; Inno Setup script: builds dist\PhoneMouse-Setup.exe. Run build.ps1, not this directly.
+#define AppVersion "1.0.2"
 
 [Setup]
 AppName=Phone Mouse

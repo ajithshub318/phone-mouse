@@ -293,6 +293,7 @@ class App:
         self.deltas, self.shots = queue.Queue(), queue.Queue()
         threading.Thread(target=raw_mouse_loop, args=(self.deltas,), daemon=True).start()
         threading.Thread(target=watch_screenshots, args=(self.shots,), daemon=True).start()
+        threading.Thread(target=self.watchdog, daemon=True).start()
 
         self.root = tk.Tk(); self.root.title("Phone Mouse"); self.root.resizable(False, False)
         icon = Path(getattr(sys, "_MEIPASS", HERE)) / "icon.ico"
@@ -352,6 +353,20 @@ class App:
         self.status.config(text=f"Phone is on the {self.cfg['side']}. Move the cursor off the {self.cfg['side']} edge.")
 
     # main loop
+
+    def watchdog(self):
+        # scrcpy.exe can stay alive after its helper on the phone dies (USB blip, phone sleep); restart it then
+        misses = 0
+        while True:
+            time.sleep(5)
+            p = self.proc
+            if not (self.hwnd and p and p.poll() is None):
+                misses = 0; continue
+            alive = "com.genymobile.scrcpy.Server" in adb("shell", "ps -A -o ARGS")
+            misses = 0 if alive else misses + 1
+            if misses >= 2:
+                log("watchdog: phone helper gone, restarting scrcpy")
+                p.kill(); misses = 0
 
     def tick(self):
         try:
